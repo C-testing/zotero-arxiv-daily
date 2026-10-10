@@ -5,12 +5,13 @@ import tempfile
 import types
 import unittest
 from copy import deepcopy
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from zotero_arxiv_daily.journal_feed import select_record, retrieve_records
+from zotero_arxiv_daily.daily_topic import override_for_day
 from zotero_arxiv_daily.recommendation_delivery import (
     validate_destination, sync_recommendations, load_delivered, mark_delivered,
 )
@@ -62,6 +63,7 @@ class JournalTests(unittest.TestCase):
     def test_unknown_date_and_retraction_rejected(self):
         self.assertIsNone(self.choose(article(**{'published-online': {}})))
         self.assertIsNone(self.choose(article(title=['Retraction: Cellulose composite films'])))
+        self.assertIsNone(self.choose(article(title=['Corrigendum: Cellulose composite films'])))
         self.assertIsNone(self.choose(article(**{'update-to': [{'type': 'correction'}]})))
 
     def test_irrelevant_article_rejected(self):
@@ -97,6 +99,65 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(len(retrieve_records(config, TODAY, fetch)), 1)
         self.assertEqual(fetch.call_args.kwargs['api_url'], 'https://api.crossref.org/journals/0935-9648/works')
         self.assertNotIn('query', fetch.call_args.args[0])
+
+    def test_gum_topic_requires_gum_not_generic_cellulose(self):
+        config = {'journal_issns': {'Advanced Materials': '0935-9648'},
+                  'allowed_journals': ['Advanced Materials'],
+                  'topic_terms': ['gum arabic', 'acacia gum', 'gum acacia', 'arabic gum']}
+        items = [article(), article(DOI='10.1234/gum', title=['Acacia-gum emulsification'], abstract='')]
+        fetch = Mock(return_value={'message': {'items': items}})
+        self.assertEqual([item['doi'] for item in retrieve_records(config, TODAY, fetch)], ['10.1234/gum'])
+
+    def test_gum_topic_still_rejects_preprints_old_and_future_papers(self):
+        for item in [article(type='posted-content'),
+                     article(**{'published-online': {'date-parts': [[2020, 1, 1]]}}),
+                     article(**{'published-online': {'date-parts': [[2027, 1, 1]]}})]:
+            item['title'] = ['Gum arabic emulsions']
+            self.assertIsNone(select_record(item, ['Advanced Materials'], CUTOFF, TODAY, ['gum arabic']))
+
+    def test_five_year_topic_queries_journals_and_does_not_require_recent_indexing(self):
+        config = {'journal_issns': {'Advanced Materials': '0935-9648'},
+                  'allowed_journals': ['Advanced Materials'], 'topic_terms': ['gum arabic'],
+                  'topic_query': 'gum arabic acacia gum', 'publication_years': 5,
+                  'lookback_days': None, 'sort_by_publication': True}
+        fetch = Mock(return_value={'message': {'items': [article(title=['Gum arabic films'])]}})
+        self.assertEqual(len(retrieve_records(config, TODAY, fetch)), 1)
+        params = fetch.call_args.args[0]
+        self.assertIn('from-pub-date:2021-10-10', params['filter'])
+        self.assertNotIn('from-index-date', params['filter'])
+        self.assertEqual(params['query'], 'gum arabic acacia gum')
+        self.assertEqual((params['sort'], params['order']), ('published', 'desc'))
+        self.assertNotIn('cursor', params)
+        self.assertEqual(params['offset'], 0)
+        retrieve_records(config, date(2024, 2, 29), fetch)
+        self.assertIn('from-pub-date:2019-02-28', fetch.call_args.args[0]['filter'])
+
+    def test_publication_sort_uses_offset_pagination_not_cursor(self):
+        config = {'queries': ['gum arabic'], 'allowed_journals': ['Advanced Materials'],
+                  'topic_terms': ['gum arabic'], 'sort_by_publication': True}
+        first = [article(title=['Gum arabic films']) for _ in range(200)]
+        fetch = Mock(side_effect=[{'message': {'items': first}},
+                                 {'message': {'items': [article(DOI='10.1234/new', title=['Gum arabic films'])]}}])
+        with patch('zotero_arxiv_daily.journal_feed.sleep'):
+            self.assertEqual(len(retrieve_records(config, TODAY, fetch)), 2)
+        self.assertEqual(fetch.call_args.args[0]['offset'], 200)
+        self.assertNotIn('cursor', fetch.call_args.args[0])
+
+
+class DailyTopicTests(unittest.TestCase):
+    def test_shanghai_day_starts_before_utc_day_and_expires(self):
+        override = {'email': {'subject_prefix': 'Gum Arabic Research Daily'}}
+        config = {'daily_overrides': {'2026-10-11': override}}
+        self.assertEqual(override_for_day(config, datetime(2026, 10, 10, 15, 59, tzinfo=timezone.utc)), {})
+        self.assertEqual(override_for_day(config, datetime(2026, 10, 10, 16, tzinfo=timezone.utc)), override)
+        self.assertEqual(override_for_day(config, datetime(2026, 10, 10, 22, tzinfo=timezone.utc)), override)
+        self.assertEqual(override_for_day(config, datetime(2026, 10, 11, 15, 59, tzinfo=timezone.utc)), override)
+        self.assertEqual(override_for_day(config, datetime(2026, 10, 11, 16, tzinfo=timezone.utc)), {})
+        self.assertEqual(config['daily_overrides']['2026-10-11'], override)
+
+    def test_naive_time_is_rejected(self):
+        with self.assertRaises(ValueError):
+            override_for_day({}, datetime(2026, 10, 11))
 
 
 class DeliveryTests(unittest.TestCase):
@@ -180,8 +241,9 @@ class RuntimeTests(unittest.TestCase):
         generated = paper()
         generated.generate_tldr = Mock(side_effect=AssertionError('No AI summary'))
         generated.generate_affiliations = Mock(side_effect=AssertionError('No AI extraction'))
+        newer = paper(doi='10.1234/new', published_date='2026-10-09')
         retriever = Mock()
-        retriever.retrieve_papers.return_value = [generated]
+        retriever.retrieve_papers.return_value = [generated, newer]
         reranker = Mock()
         reranker.rerank.side_effect = lambda papers, corpus: papers
         modules = {
@@ -194,17 +256,19 @@ class RuntimeTests(unittest.TestCase):
             'zotero_arxiv_daily.protocol': self.module('protocol', Paper=SimpleNamespace, CorpusPaper=SimpleNamespace),
             'zotero_arxiv_daily.retriever': self.module('retriever', get_retriever_cls=lambda name: lambda config: retriever),
             'zotero_arxiv_daily.reranker': self.module('reranker', get_reranker_cls=lambda name: lambda config: reranker),
-            'zotero_arxiv_daily.construct_email': self.module('email', render_email=lambda papers: 'html'),
+            'zotero_arxiv_daily.construct_email': self.module('email', render_email=Mock(return_value='html')),
         }
         config = SimpleNamespace(
             llm={'enabled': False}, zotero=SimpleNamespace(include_path=None, ignore_path=None),
             executor=SimpleNamespace(source=['journals'], reranker='local', max_paper_num=10, send_empty=False))
         config.zotero.get = lambda key, default=None: default
-        config.executor.get = lambda key, default=None: default
+        config.executor.get = lambda key, default=None: 'publication_date' if key == 'order_by' else default
         with patch.dict(sys.modules, modules):
             executor = self.load('executor').Executor(config)
             executor.fetch_zotero_corpus = lambda: [SimpleNamespace(abstract='cellulose', paths=[])]
             executor.run()
+        self.assertEqual(modules['zotero_arxiv_daily.construct_email'].render_email.call_args.args[0],
+                         [newer, generated])
         openai.assert_not_called()
         generated.generate_tldr.assert_not_called()
 

@@ -124,6 +124,8 @@ class Executor:
         if len(all_papers) > 0:
             logger.info("Reranking papers...")
             reranked_papers = self.reranker.rerank(all_papers, corpus)
+            if self.config.executor.get("order_by") == "publication_date":
+                reranked_papers.sort(key=lambda paper: (paper.published_date or "", paper.score or 0), reverse=True)
             reranked_papers = reranked_papers[:self.config.executor.max_paper_num]
             if self.llm_enabled:
                 logger.info("Generating TLDR and affiliations...")

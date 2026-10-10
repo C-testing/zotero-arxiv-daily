@@ -81,3 +81,48 @@ executor:
   source: ['journals']
   send_empty: false
   delivery_state: .delivery/sent.json
+
+daily_overrides:
+  "2026-10-11":
+    executor:
+      order_by: publication_date
+    email:
+      subject_prefix: Gum Arabic Research Daily
+    zotero:
+      research_profile: >-
+        Gum arabic and acacia gum, arabinogalactan-protein structure, molecular
+        interactions, emulsification and interfacial adsorption, rheology,
+        physical and chemical modification, complex coacervation, natural polymer
+        blends, nanocellulose composites, films and coatings, encapsulation,
+        hydrogels, bio-based functional materials and sensing applications.
+    source:
+      journals:
+        lookback_days: null
+        publication_years: 5
+        sort_by_publication: true
+        topic_terms: ["gum arabic", "acacia gum", "gum acacia", "arabic gum"]
+        topic_query: gum arabic acacia gum
+        queries: ["gum arabic", "acacia gum"]
+        journal_issns:
+          Carbohydrate Polymers: 0144-8617
+          Food Hydrocolloids: 0268-005X
+          Biomacromolecules: 1525-7797
+        allowed_journals:
+          - Nature
+          - Science
+          - Nature Materials
+          - Nature Nanotechnology
+          - Nature Electronics
+          - Nature Communications
+          - Science Advances
+          - Advanced Materials
+          - Advanced Functional Materials
+          - Advanced Science
+          - Materials Horizons
+          - ACS Nano
+          - Nano Letters
+          - Chemical Reviews
+          - Chemical Society Reviews
+          - Carbohydrate Polymers
+          - Food Hydrocolloids
+          - Biomacromolecules

@@ -1,16 +1,20 @@
 import os
 import sys
 import logging
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 import hydra
 from loguru import logger
 import dotenv
 from zotero_arxiv_daily.executor import Executor
+from zotero_arxiv_daily.daily_topic import override_for_day
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 dotenv.load_dotenv()
 
 @hydra.main(version_base=None, config_path="../../config", config_name="default")
 def main(config:DictConfig):
+    override = override_for_day(config)
+    if override:
+        config = OmegaConf.merge(OmegaConf.to_container(config, resolve=False), override)
     # Configure loguru log level based on config
     log_level = "DEBUG" if config.executor.debug else "INFO"
     logger.remove()  # Remove default handler
@@ -27,6 +31,8 @@ def main(config:DictConfig):
 
     if config.executor.debug:
         logger.info("Debug mode is enabled")
+    if override:
+        logger.info("Scheduled daily research topic is active")
     
     executor = Executor(config)
     executor.run()

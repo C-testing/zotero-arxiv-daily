@@ -76,7 +76,7 @@ reranker:
     encode_kwargs: null
 
 executor:
-  debug: ${oc.env:DEBUG,false}
+  debug: false
   max_paper_num: 10
   source: ['journals']
   send_empty: false

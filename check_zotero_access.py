@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--user-id", type=int, default=12724319)
     parser.add_argument("--require-write", action="store_true")
     parser.add_argument("--collection-key", default="BQ33UNRV")
+    parser.add_argument("--report-destination", action="store_true")
     args = parser.parse_args()
     key = os.environ.get("ZOTERO_KEY") or getpass.getpass("Zotero API key: ")
     if not key.strip():
@@ -36,7 +37,18 @@ def main():
         if args.require_write and not account.get("access", {}).get("user", {}).get("write"):
             print("The key needs library write permission to save recommendations.", file=sys.stderr)
             return 1
-        fetch(f"/users/{args.user_id}/collections/{args.collection_key}")
+        collection = fetch(f"/users/{args.user_id}/collections/{args.collection_key}")
+        if args.report_destination:
+            destination = fetch(
+                f"/users/{args.user_id}/collections/{args.collection_key}/items/top"
+                "?format=json&limit=100&sort=dateAdded&direction=desc"
+            )
+            recommendations = [item["data"] for item in destination
+                               if any(tag.get("tag") == "cellulose-daily"
+                                      for tag in item["data"].get("tags", []))]
+            journals = sorted({item.get("publicationTitle", "") for item in recommendations})
+            print(f"Destination: {collection['data']['name']}; tagged recommendations: {len(recommendations)}.")
+            print("Journals: " + "; ".join(journals))
         items = fetch(
             f"/users/{args.user_id}/items?format=json&limit=100"
             "&itemType=conferencePaper%20%7C%7C%20journalArticle%20%7C%7C%20preprint"

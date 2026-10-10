@@ -1,27 +1,83 @@
 zotero:
-  user_id: ${oc.env:ZOTERO_ID}
+  user_id: 12724319
   api_key: ${oc.env:ZOTERO_KEY}
-  include_path: null # Or set a list of glob patterns, e.g. ["2026/survey/**","2026/reading-group/**"]
+  include_path: ["博士研究内容/纤维素材料", "博士研究内容/纤维素材料/**", "博士研究内容/水凝胶探索", "博士研究内容/水凝胶探索/**", "博士研究内容/课题组论文/纤维素材料", "博士研究内容/课题组论文/纤维素材料/**"]
+  ignore_path: ["公众号文章", "公众号文章/**"]
+  recommendation_collection: BQ33UNRV
+  recommendation_collection_name: 公众号文章
+  research_profile: >-
+    Cellulose nanocrystals and cellulose nanofibrils, nanocellulose surface
+    functionalization, tannic acid and polyphenol modification, natural polymer
+    matrices including gum arabic and pectin, interfacial load transfer,
+    self-assembly and orientation, biomimetic hierarchical composites,
+    strength-toughness balance, fracture and fatigue, water and humidity effects,
+    conductive hydrogels, flexible strain and pressure sensors, wearable devices,
+    ionic and electronic conduction, sustainable bio-based functional materials.
 
 email:
   sender: ${oc.env:SENDER}
   receiver: ${oc.env:RECEIVER}
   smtp_server: smtp.qq.com
   smtp_port: 465
+  subject_prefix: Cellulose Journal Daily
   sender_password: ${oc.env:SENDER_PASSWORD}
 
 llm:
+  enabled: false
   api:
-    key: ${oc.env:OPENAI_API_KEY}
-    base_url: ${oc.env:OPENAI_API_BASE}
+    key: ${oc.env:OPENAI_API_KEY,null}
+    base_url: ${oc.env:OPENAI_API_BASE,null}
   api_mode: chat_completion
   generation_kwargs:
-    model: gpt-4o-mini
+    model: null
+  language: Chinese
 
 source:
-  arxiv:
-    category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
+  journals:
+    lookback_days: 7
+    publication_days: 30
+    queries: ["cellulose", "nanocellulose", "bacterial cellulose", "polysaccharide composite", "biopolymer sensor"]
+    journal_issns:
+      Nature: 0028-0836
+      Science: 0036-8075
+      Nature Materials: 1476-1122
+      Nature Nanotechnology: 1748-3387
+      Nature Electronics: 2520-1131
+      Nature Communications: 2041-1723
+      Science Advances: 2375-2548
+      Advanced Materials: 0935-9648
+      Advanced Functional Materials: 1616-301X
+      Advanced Science: 2198-3844
+      Materials Horizons: 2051-6347
+      ACS Nano: 1936-0851
+      Nano Letters: 1530-6984
+      Chemical Reviews: 0009-2665
+      Chemical Society Reviews: 0306-0012
+    allowed_journals:
+      - Nature
+      - Science
+      - Nature Materials
+      - Nature Nanotechnology
+      - Nature Electronics
+      - Nature Communications
+      - Science Advances
+      - Advanced Materials
+      - Advanced Functional Materials
+      - Advanced Science
+      - Materials Horizons
+      - ACS Nano
+      - Nano Letters
+      - Chemical Reviews
+      - Chemical Society Reviews
+
+reranker:
+  local:
+    model: sentence-transformers/all-MiniLM-L6-v2
+    encode_kwargs: null
 
 executor:
-  debug: ${oc.env:DEBUG,null}
-  source: ['arxiv']
+  debug: ${oc.env:DEBUG,false}
+  max_paper_num: 10
+  source: ['journals']
+  send_empty: false
+  delivery_state: .delivery/sent.json

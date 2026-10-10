@@ -3,6 +3,7 @@ import re
 import glob
 import math
 import smtplib
+import ssl
 from collections import Counter
 from email.header import Header
 from email.mime.text import MIMEText
@@ -153,19 +154,16 @@ def send_email(config:DictConfig, html:str):
     msg['From'] = _format_addr('Github Action <%s>' % sender)
     msg['To'] = _format_addr('You <%s>' % receiver)
     today = datetime.datetime.now().strftime('%Y/%m/%d')
-    msg['Subject'] = Header(f'Daily arXiv {today}', 'utf-8').encode()
+    prefix = config.email.get('subject_prefix', 'Daily arXiv')
+    msg['Subject'] = Header(f'{prefix} {today}', 'utf-8').encode()
 
-    try:
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-    except Exception as e:
-        logger.debug(f"Failed to use TLS. {e}\nTry to use SSL.")
-        try:
-            server = smtplib.SMTP_SSL(smtp_server, smtp_port)
-        except Exception as e:
-            logger.debug(f"Failed to use SSL. {e}\nTry to use plain text.")
-            server = smtplib.SMTP(smtp_server, smtp_port)
-
-    server.login(sender, password)
-    server.sendmail(sender, [receiver], msg.as_string())
-    server.quit()
+    context = ssl.create_default_context()
+    if smtp_port == 465:
+        server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30, context=context)
+    else:
+        server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
+    with server:
+        if smtp_port != 465:
+            server.starttls(context=context)
+        server.login(sender, password)
+        server.sendmail(sender, [receiver], msg.as_string())

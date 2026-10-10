@@ -17,3 +17,6 @@ models
 test-compose.yml
 outputs
 config/private.yaml
+.delivery/
+verification-output/
+verification-deps/

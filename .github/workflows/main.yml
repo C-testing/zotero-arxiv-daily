@@ -1,4 +1,9 @@
 name: Send emails daily
+permissions:
+  contents: read
+concurrency:
+  group: cellulose-daily
+  cancel-in-progress: false
 on:
   workflow_dispatch:
   schedule:
@@ -7,15 +12,20 @@ on:
 jobs:
   calculate-and-send:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          repository: ${{ vars.REPOSITORY }}
-          ref: ${{ vars.REF }}
-
       - name: Setup uv
         uses: astral-sh/setup-uv@v7
+
+      - name: Restore delivery history
+        uses: actions/cache/restore@v4
+        with:
+          path: .delivery
+          key: ${{ runner.os }}-cellulose-delivery-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ runner.os }}-cellulose-delivery-v1-
 
       - name: Run script
         env:
@@ -28,7 +38,21 @@ jobs:
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
-          printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
-          echo "Use custom config: "
-          cat config/custom.yaml
-          uv run src/zotero_arxiv_daily/main.py
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          required = ['ZOTERO_KEY', 'SENDER', 'RECEIVER', 'SENDER_PASSWORD']
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit('Missing GitHub Actions secrets: ' + ', '.join(missing))
+          if os.environ.get('CUSTOM_CONFIG', '').strip():
+              Path('config/custom.yaml').write_text(os.environ['CUSTOM_CONFIG'], encoding='utf-8')
+          PY
+          uv run --locked src/zotero_arxiv_daily/main.py
+
+      - name: Save delivery history
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: .delivery
+          key: ${{ runner.os }}-cellulose-delivery-v1-${{ github.run_id }}-${{ github.run_attempt }}
